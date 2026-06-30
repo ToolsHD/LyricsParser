@@ -75,6 +75,12 @@ export class ELRCParser implements ILyricsParser {
 
       if (agentId) {
         parsedLine.agentId = agentId;
+        if (agentId.toLowerCase() === 'bg') {
+          parsedLine.isBackground = true;
+          if (words.length > 0) {
+            words.forEach(w => w.isBackground = true);
+          }
+        }
       }
 
       if (words.length > 0) {
