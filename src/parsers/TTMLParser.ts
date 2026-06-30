@@ -1,34 +1,22 @@
-import { XMLParser } from 'fast-xml-parser';
+import { DOMParser } from '@xmldom/xmldom';
 import { ILyricsParser, LyricsDocument, LyricsMetadata, LyricsLine, LyricsWord, LyricsTransliteration, ParserOptions } from '../models/types';
 import { timeStrToMs } from '../utils/time';
 
-function ttmlTimeToMs(timeStr: string): number {
+function ttmlTimeToMs(timeStr: string | null): number {
   if (!timeStr) return 0;
-  // Handle 'mm:ss.xxx' or 'ss.xxx'
   const parts = timeStr.split(':');
   if (parts.length === 1) {
-    // Just seconds.milliseconds (e.g., 44.851)
     return parseFloat(parts[0]) * 1000;
   } else {
-    // mm:ss.xxx (e.g., 1:21.213)
     return timeStrToMs(timeStr);
   }
 }
 
 export class TTMLParser implements ILyricsParser {
   public parse(content: string, options?: ParserOptions): LyricsDocument {
-    const parser = new XMLParser({
-      ignoreAttributes: false,
-      attributeNamePrefix: "@_",
-      textNodeName: "#text",
-      isArray: (name) => { 
-        return ['p', 'span', 'ttm:agent', 'songwriter', 'div', 'transliteration', 'text'].indexOf(name) !== -1;
-      }
-    });
-
-    const parsedObj = parser.parse(content);
-    const tt = parsedObj.tt || {};
-
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(content, 'text/xml');
+    
     const metadata: LyricsMetadata = {
       artists: [],
       songwriters: [],
@@ -36,175 +24,142 @@ export class TTMLParser implements ILyricsParser {
       agents: {}
     };
 
-    // Extract attributes from root <tt>
-    for (const key in tt) {
-      if (key.startsWith('@_')) {
-        metadata.attributes![key.substring(2)] = tt[key];
+    const tt = doc.getElementsByTagName('tt')[0];
+    if (tt) {
+      for (let i = 0; i < tt.attributes.length; i++) {
+        const attr = tt.attributes[i];
+        metadata.attributes![attr.name.replace('xmlns:', '')] = attr.value;
       }
     }
 
-    const rawTransliterations: Record<string, { lang: string, textObj: any }[]> = {};
-
-    // Extract metadata from <head><metadata>
-    const headMeta = tt.head?.metadata;
-    if (headMeta) {
-      // Agents
-      if (headMeta['ttm:agent']) {
-        const agents = headMeta['ttm:agent'];
-        for (const agent of agents) {
-          const id = agent['@_xml:id'];
-          const type = agent['@_type'];
-          const name = agent['ttm:name'] ? agent['ttm:name']['#text'] || agent['ttm:name'] : id;
-          if (id) {
-            metadata.agents![id] = { name: name || id, type };
-          }
-        }
+    const agents = doc.getElementsByTagName('ttm:agent');
+    for (let i = 0; i < agents.length; i++) {
+      const agent = agents[i];
+      const id = agent.getAttribute('xml:id');
+      const type = agent.getAttribute('type');
+      const nameNode = agent.getElementsByTagName('ttm:name')[0];
+      const name = nameNode ? nameNode.textContent : id;
+      if (id) {
+        metadata.agents![id] = { name: name || id, type: type || undefined };
       }
+    }
+    
+    const songwritersNode = doc.getElementsByTagName('songwriters')[0];
+    if (songwritersNode) {
+       const sws = songwritersNode.getElementsByTagName('songwriter');
+       for (let i = 0; i < sws.length; i++) {
+         if (sws[i].textContent) {
+             metadata.songwriters!.push(sws[i].textContent!);
+         }
+       }
+    }
 
-      // iTunesMetadata attributes
-      const itunesMeta = headMeta.iTunesMetadata;
-      if (itunesMeta) {
-        for (const key in itunesMeta) {
-          if (key.startsWith('@_')) {
-             metadata.attributes!['itunes:' + key.substring(2)] = itunesMeta[key];
-          }
+    // Transliterations
+    const rawTransliterations: Record<string, { lang: string, textNode: Element }[]> = {};
+    const transElements = doc.getElementsByTagName('transliteration');
+    for (let i = 0; i < transElements.length; i++) {
+        const trans = transElements[i];
+        const lang = trans.getAttribute('xml:lang') || 'unknown';
+        const textElements = trans.getElementsByTagName('text');
+        for (let j = 0; j < textElements.length; j++) {
+            const t = textElements[j];
+            const key = t.getAttribute('for');
+            if (key) {
+                if (!rawTransliterations[key]) rawTransliterations[key] = [];
+                rawTransliterations[key].push({ lang, textNode: t });
+            }
         }
-        if (itunesMeta.songwriters && itunesMeta.songwriters.songwriter) {
-           metadata.songwriters = itunesMeta.songwriters.songwriter.map((sw: any) => 
-             sw['#text'] || sw
-           );
-        }
-      }
-
-      // Transliterations
-      const transMeta = headMeta.transliterations;
-      if (transMeta && transMeta.transliteration) {
-          for (const trans of transMeta.transliteration) {
-              const lang = trans['@_xml:lang'] || "unknown";
-              if (trans.text) {
-                  for (const t of trans.text) {
-                      const key = t['@_for'];
-                      if (key) {
-                          if (!rawTransliterations[key]) rawTransliterations[key] = [];
-                          rawTransliterations[key].push({ lang, textObj: t });
-                      }
-                  }
-              }
-          }
-      }
     }
 
     const parsedLines: LyricsLine[] = [];
 
-    // Helper to recursively process spans
-    const processSpan = (
-        spanNode: any, 
-        currentBg: boolean, 
-        lineStartMs: number, 
-        outWords: LyricsWord[], 
-        context: { fullText: string, hasBg: boolean }
-    ) => {
-        const isBg = currentBg || spanNode['@_ttm:role'] === 'x-bg';
-        
-        if (spanNode['#text']) {
-            const wordStart = spanNode['@_begin'] ? ttmlTimeToMs(spanNode['@_begin']) : undefined;
-            const wordEnd = spanNode['@_end'] ? ttmlTimeToMs(spanNode['@_end']) : undefined;
-            
-            const wordObj: LyricsWord = {
-               text: spanNode['#text'],
-               startTime: wordStart || lineStartMs,
-            };
+    // Process span tree exactly preserving whitespace natively
+    const processSpans = (element: Element, isBackground: boolean, defaultStartMs: number) => {
+      const words: LyricsWord[] = [];
+      let fullText = "";
+      let hasBg = false;
 
-            if (wordEnd !== undefined) {
-                wordObj.endTime = wordEnd;
-            }
-
-            if (isBg) {
-                wordObj.isBackground = true;
-                context.hasBg = true;
-            }
-
-            outWords.push(wordObj);
-            context.fullText += spanNode['#text'] + " ";
+      const collect = (node: Node, currentBg: boolean) => {
+        for (let i = 0; i < node.childNodes.length; i++) {
+          const child = node.childNodes[i];
+          
+          if (child.nodeType === 3) { // TEXT_NODE
+             fullText += child.nodeValue || "";
+          } 
+          else if (child.nodeType === 1) { // ELEMENT_NODE
+             const el = child as Element;
+             if (el.tagName === 'span') {
+                const isBg = currentBg || el.getAttribute('ttm:role') === 'x-bg';
+                const begin = el.getAttribute('begin');
+                const end = el.getAttribute('end');
+                
+                // If the span has a begin time, it's a timed word
+                if (begin) {
+                   const wordText = el.textContent || "";
+                   const word: LyricsWord = {
+                      text: wordText,
+                      startTime: ttmlTimeToMs(begin)
+                   };
+                   if (end) word.endTime = ttmlTimeToMs(end);
+                   if (isBg) {
+                       word.isBackground = true;
+                       hasBg = true;
+                   }
+                   words.push(word);
+                   fullText += wordText; // Append the text of this timed span
+                } else {
+                   // Wrapper span (like for x-bg)
+                   collect(el, isBg);
+                }
+             }
+          }
         }
+      };
 
-        if (spanNode.span) {
-            const nestedSpans = Array.isArray(spanNode.span) ? spanNode.span : [spanNode.span];
-            for (const nested of nestedSpans) {
-                processSpan(nested, isBg, lineStartMs, outWords, context);
-            }
-        }
+      collect(element, isBackground);
+      
+      return { words, fullText, hasBg };
     };
 
-    // Extract body divs and paragraphs
-    const body = tt.body;
-    let divs = body?.div || [];
-    // If there's no div, wrap p in a fake div just to simplify loop
-    if (!body?.div && body?.p) {
-       divs = [{ p: body.p }];
-    }
+    const paragraphs = doc.getElementsByTagName('p');
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      const begin = p.getAttribute('begin');
+      const end = p.getAttribute('end');
+      const agentId = p.getAttribute('ttm:agent');
+      const lineKey = p.getAttribute('itunes:key');
+      const part = p.parentNode && p.parentNode.nodeName === 'div' ? (p.parentNode as Element).getAttribute('itunes:song-part') : null;
 
-    for (const div of divs) {
-       const part = div['@_itunes:song-part'];
-       const ps = div.p || [];
+      const lineStart = ttmlTimeToMs(begin);
+      const res = processSpans(p, false, lineStart);
+      
+      const lineObj: LyricsLine = {
+         startTime: lineStart,
+         endTime: ttmlTimeToMs(end) || undefined,
+         agentId: agentId || undefined,
+         text: res.fullText.trim(), // The final line text is trimmed, but internal word spacing is perfectly preserved
+      };
 
-       for (const p of ps) {
-          const lineStart = ttmlTimeToMs(p['@_begin']);
-          const lineEnd = ttmlTimeToMs(p['@_end']);
-          const agentId = p['@_ttm:agent'];
-          const lineKey = p['@_itunes:key'];
+      if (res.words.length > 0) lineObj.words = res.words;
+      if (lineKey) lineObj.key = lineKey;
+      if (part) lineObj.part = part;
+      if (res.hasBg) lineObj.isBackground = true;
 
-          const lineObj: LyricsLine = {
-             startTime: lineStart,
-             endTime: lineEnd,
-             agentId: agentId,
-             text: "",
-             words: []
-          };
-
-          if (lineKey) lineObj.key = lineKey;
-          if (part) lineObj.part = part;
-
-          const context = { fullText: "", hasBg: false };
-
-          // Handle spans (words)
-          if (p.span && Array.isArray(p.span)) {
-             for (const span of p.span) {
-                 processSpan(span, false, lineStart, lineObj.words!, context);
-             }
-          } else if (!p.span) {
-             // If no spans, just grab text
-             context.fullText = p['#text'] || p || "";
+      // Handle transliterations
+      if (lineKey && rawTransliterations[lineKey]) {
+          lineObj.transliterations = [];
+          for (const rt of rawTransliterations[lineKey]) {
+              const tRes = processSpans(rt.textNode, false, lineStart);
+              const transObj: LyricsTransliteration = {
+                  lang: rt.lang,
+                  text: tRes.fullText.trim()
+              };
+              if (tRes.words.length > 0) transObj.words = tRes.words;
+              lineObj.transliterations.push(transObj);
           }
+      }
 
-          lineObj.text = context.fullText.trim();
-          if (context.hasBg) lineObj.isBackground = true;
-          if (lineObj.words?.length === 0) delete lineObj.words;
-
-          // Check for transliterations for this line
-          if (lineKey && rawTransliterations[lineKey]) {
-             lineObj.transliterations = [];
-             for (const rt of rawTransliterations[lineKey]) {
-                const transObj: LyricsTransliteration = { lang: rt.lang, text: "", words: [] };
-                const tContext = { fullText: "", hasBg: false };
-                
-                // the <text> node might contain spans directly
-                if (rt.textObj.span && Array.isArray(rt.textObj.span)) {
-                    for (const span of rt.textObj.span) {
-                        processSpan(span, false, lineStart, transObj.words!, tContext);
-                    }
-                } else if (!rt.textObj.span) {
-                    tContext.fullText = rt.textObj['#text'] || rt.textObj || "";
-                }
-
-                transObj.text = tContext.fullText.trim();
-                if (transObj.words?.length === 0) delete transObj.words;
-                lineObj.transliterations.push(transObj);
-             }
-          }
-
-          parsedLines.push(lineObj);
-       }
+      parsedLines.push(lineObj);
     }
 
     parsedLines.sort((a, b) => a.startTime - b.startTime);
