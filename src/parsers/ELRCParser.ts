@@ -1,5 +1,6 @@
 import { ILyricsParser, LyricsDocument, LyricsMetadata, LyricsLine, LyricsWord, ParserOptions } from '../models/types';
 import { timeStrToMs } from '../utils/time';
+import he from 'he';
 
 export class ELRCParser implements ILyricsParser {
   public parse(content: string, options?: ParserOptions): LyricsDocument {
@@ -47,7 +48,7 @@ export class ELRCParser implements ILyricsParser {
 
       while ((match = wordRegex.exec(textToParse)) !== null) {
         const wordTimeStr = match[1];
-        const wordText = match[2];
+        const wordText = he.decode(match[2]);
         const wordStartTime = timeStrToMs(wordTimeStr);
         words.push({
           startTime: wordStartTime,
@@ -65,7 +66,7 @@ export class ELRCParser implements ILyricsParser {
 
       // If no words were found (maybe hybrid file), just use the rest of the text
       if (words.length === 0) {
-        fullText = textToParse.trim();
+        fullText = he.decode(textToParse.trim());
       }
 
       const parsedLine: LyricsLine = {

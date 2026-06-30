@@ -1,6 +1,7 @@
 import { DOMParser } from '@xmldom/xmldom';
 import { ILyricsParser, LyricsDocument, LyricsMetadata, LyricsLine, LyricsWord, LyricsTransliteration, ParserOptions } from '../models/types';
 import { timeStrToMs } from '../utils/time';
+import he from 'he';
 
 function ttmlTimeToMs(timeStr: string | null): number {
   if (!timeStr) return 0;
@@ -85,7 +86,7 @@ export class TTMLParser implements ILyricsParser {
           const child = node.childNodes[i];
           
           if (child.nodeType === 3) { // TEXT_NODE
-             const text = child.nodeValue || "";
+             const text = he.decode(child.nodeValue || "");
              fullText += text;
              if (text.length > 0) {
                  lastWasSpace = /\s$/.test(text);
@@ -100,7 +101,7 @@ export class TTMLParser implements ILyricsParser {
                 
                 // If the span has a begin time, it's a timed word
                 if (begin) {
-                   const wordText = el.textContent || "";
+                   const wordText = he.decode(el.textContent || "");
                    const word: LyricsWord = {
                       text: wordText,
                       startTime: ttmlTimeToMs(begin)

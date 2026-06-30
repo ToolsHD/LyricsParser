@@ -1,5 +1,6 @@
 import { ILyricsParser, LyricsDocument, LyricsMetadata, LyricsLine, ParserOptions } from '../models/types';
 import { timeStrToMs } from '../utils/time';
+import he from 'he';
 
 export class LRCParser implements ILyricsParser {
   public parse(content: string, options?: ParserOptions): LyricsDocument {
@@ -21,7 +22,7 @@ export class LRCParser implements ILyricsParser {
       const metaMatch = line.match(metaRegex);
       if (metaMatch) {
         const key = metaMatch[1].toLowerCase();
-        const value = metaMatch[2].trim();
+        const value = he.decode(metaMatch[2].trim());
         
         switch (key) {
           case 'ti':
@@ -52,7 +53,7 @@ export class LRCParser implements ILyricsParser {
 
         parsedLines.push({
           startTime: startTimeMs,
-          text: text
+          text: he.decode(text)
         });
       }
     }
