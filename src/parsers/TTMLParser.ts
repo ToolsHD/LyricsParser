@@ -78,13 +78,18 @@ export class TTMLParser implements ILyricsParser {
       const words: LyricsWord[] = [];
       let fullText = "";
       let hasBg = false;
+      let lastWasSpace = true;
 
       const collect = (node: Node, currentBg: boolean) => {
         for (let i = 0; i < node.childNodes.length; i++) {
           const child = node.childNodes[i];
           
           if (child.nodeType === 3) { // TEXT_NODE
-             fullText += child.nodeValue || "";
+             const text = child.nodeValue || "";
+             fullText += text;
+             if (text.length > 0) {
+                 lastWasSpace = /\s$/.test(text);
+             }
           } 
           else if (child.nodeType === 1) { // ELEMENT_NODE
              const el = child as Element;
@@ -105,8 +110,18 @@ export class TTMLParser implements ILyricsParser {
                        word.isBackground = true;
                        hasBg = true;
                    }
+
+                   const startsWithSpace = /^\s/.test(wordText);
+                   if (!lastWasSpace && !startsWithSpace && words.length > 0) {
+                       word.isSyllable = true;
+                       words[words.length - 1].isSyllable = true;
+                   }
+
                    words.push(word);
                    fullText += wordText; // Append the text of this timed span
+                   if (wordText.length > 0) {
+                       lastWasSpace = /\s$/.test(wordText);
+                   }
                 } else {
                    // Wrapper span (like for x-bg)
                    collect(el, isBg);
@@ -137,7 +152,7 @@ export class TTMLParser implements ILyricsParser {
          startTime: lineStart,
          endTime: ttmlTimeToMs(end) || undefined,
          agentId: agentId || undefined,
-         text: res.fullText.trim(), // The final line text is trimmed, but internal word spacing is perfectly preserved
+         text: res.fullText.replace(/\s+/g, ' ').trim(), // The final line text is cleaned and trimmed
       };
 
       if (res.words.length > 0) lineObj.words = res.words;
@@ -152,7 +167,7 @@ export class TTMLParser implements ILyricsParser {
               const tRes = processSpans(rt.textNode, false, lineStart);
               const transObj: LyricsTransliteration = {
                   lang: rt.lang,
-                  text: tRes.fullText.trim()
+                  text: tRes.fullText.replace(/\s+/g, ' ').trim()
               };
               if (tRes.words.length > 0) transObj.words = tRes.words;
               lineObj.transliterations.push(transObj);

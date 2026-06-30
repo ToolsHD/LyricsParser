@@ -1,10 +1,26 @@
 export function timeStrToMs(timeStr: string): number {
-  // Parses "mm:ss.xx" or "mm:ss.xxx" into milliseconds
+  // Parses "hh:mm:ss.xxx", "mm:ss.xx", or "ss.xxx" into milliseconds
   const parts = timeStr.split(':');
-  if (parts.length !== 2) return 0;
-  const minutes = parseInt(parts[0], 10);
-  const secondsParts = parts[1].split('.');
-  const seconds = parseInt(secondsParts[0], 10);
+  
+  let hours = 0;
+  let minutes = 0;
+  let secondsStr = "";
+
+  if (parts.length === 3) {
+    hours = parseInt(parts[0], 10);
+    minutes = parseInt(parts[1], 10);
+    secondsStr = parts[2];
+  } else if (parts.length === 2) {
+    minutes = parseInt(parts[0], 10);
+    secondsStr = parts[1];
+  } else if (parts.length === 1) {
+    secondsStr = parts[0];
+  } else {
+    return 0;
+  }
+
+  const secondsParts = secondsStr.split('.');
+  const seconds = parseInt(secondsParts[0], 10) || 0;
   let milliseconds = 0;
   if (secondsParts.length > 1) {
     let msStr = secondsParts[1];
@@ -13,5 +29,5 @@ export function timeStrToMs(timeStr: string): number {
     if (msStr.length === 1) msStr += '00';
     milliseconds = parseInt(msStr.substring(0, 3), 10);
   }
-  return minutes * 60 * 1000 + seconds * 1000 + milliseconds;
+  return hours * 3600 * 1000 + minutes * 60 * 1000 + seconds * 1000 + milliseconds;
 }
