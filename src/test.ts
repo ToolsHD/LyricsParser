@@ -27,3 +27,4 @@ testFormat('LRC', 'lyrics.lrc');
 testFormat('ELRC', 'lyrics-elrc.lrc');
 testFormat('TTML Line', 'lyrics-line.ttml');
 testFormat('TTML Word', 'lyrics-word.ttml');
+testFormat('TTML Transliteration', 'lyrics-transliteration.ttml');

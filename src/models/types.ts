@@ -21,7 +21,14 @@ export interface LyricsWord {
   isSyllable?: boolean;
 }
 
+export interface LyricsTransliteration {
+  lang: string;
+  text: string;
+  words?: LyricsWord[];
+}
+
 export interface LyricsLine {
+  key?: string;
   startTime: number;
   endTime?: number;
   agentId?: string;
@@ -29,6 +36,7 @@ export interface LyricsLine {
   part?: string;
   isBackground?: boolean;
   words?: LyricsWord[];
+  transliterations?: LyricsTransliteration[];
 }
 
 export interface LyricsDocument {

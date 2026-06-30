@@ -1,5 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
-import { ILyricsParser, LyricsDocument, LyricsMetadata, LyricsLine, LyricsWord, ParserOptions } from '../models/types';
+import { ILyricsParser, LyricsDocument, LyricsMetadata, LyricsLine, LyricsWord, LyricsTransliteration, ParserOptions } from '../models/types';
 import { timeStrToMs } from '../utils/time';
 
 function ttmlTimeToMs(timeStr: string): number {
@@ -21,8 +21,8 @@ export class TTMLParser implements ILyricsParser {
       ignoreAttributes: false,
       attributeNamePrefix: "@_",
       textNodeName: "#text",
-      isArray: (name, jpath, isLeafNode, isAttribute) => { 
-        return ['p', 'span', 'ttm:agent', 'songwriter', 'div'].indexOf(name) !== -1;
+      isArray: (name) => { 
+        return ['p', 'span', 'ttm:agent', 'songwriter', 'div', 'transliteration', 'text'].indexOf(name) !== -1;
       }
     });
 
@@ -42,6 +42,8 @@ export class TTMLParser implements ILyricsParser {
         metadata.attributes![key.substring(2)] = tt[key];
       }
     }
+
+    const rawTransliterations: Record<string, { lang: string, textObj: any }[]> = {};
 
     // Extract metadata from <head><metadata>
     const headMeta = tt.head?.metadata;
@@ -73,9 +75,66 @@ export class TTMLParser implements ILyricsParser {
            );
         }
       }
+
+      // Transliterations
+      const transMeta = headMeta.transliterations;
+      if (transMeta && transMeta.transliteration) {
+          for (const trans of transMeta.transliteration) {
+              const lang = trans['@_xml:lang'] || "unknown";
+              if (trans.text) {
+                  for (const t of trans.text) {
+                      const key = t['@_for'];
+                      if (key) {
+                          if (!rawTransliterations[key]) rawTransliterations[key] = [];
+                          rawTransliterations[key].push({ lang, textObj: t });
+                      }
+                  }
+              }
+          }
+      }
     }
 
     const parsedLines: LyricsLine[] = [];
+
+    // Helper to recursively process spans
+    const processSpan = (
+        spanNode: any, 
+        currentBg: boolean, 
+        lineStartMs: number, 
+        outWords: LyricsWord[], 
+        context: { fullText: string, hasBg: boolean }
+    ) => {
+        const isBg = currentBg || spanNode['@_ttm:role'] === 'x-bg';
+        
+        if (spanNode['#text']) {
+            const wordStart = spanNode['@_begin'] ? ttmlTimeToMs(spanNode['@_begin']) : undefined;
+            const wordEnd = spanNode['@_end'] ? ttmlTimeToMs(spanNode['@_end']) : undefined;
+            
+            const wordObj: LyricsWord = {
+               text: spanNode['#text'],
+               startTime: wordStart || lineStartMs,
+            };
+
+            if (wordEnd !== undefined) {
+                wordObj.endTime = wordEnd;
+            }
+
+            if (isBg) {
+                wordObj.isBackground = true;
+                context.hasBg = true;
+            }
+
+            outWords.push(wordObj);
+            context.fullText += spanNode['#text'] + " ";
+        }
+
+        if (spanNode.span) {
+            const nestedSpans = Array.isArray(spanNode.span) ? spanNode.span : [spanNode.span];
+            for (const nested of nestedSpans) {
+                processSpan(nested, isBg, lineStartMs, outWords, context);
+            }
+        }
+    };
 
     // Extract body divs and paragraphs
     const body = tt.body;
@@ -93,6 +152,7 @@ export class TTMLParser implements ILyricsParser {
           const lineStart = ttmlTimeToMs(p['@_begin']);
           const lineEnd = ttmlTimeToMs(p['@_end']);
           const agentId = p['@_ttm:agent'];
+          const lineKey = p['@_itunes:key'];
 
           const lineObj: LyricsLine = {
              startTime: lineStart,
@@ -102,72 +162,51 @@ export class TTMLParser implements ILyricsParser {
              words: []
           };
 
-          if (part) {
-             lineObj.part = part;
-          }
+          if (lineKey) lineObj.key = lineKey;
+          if (part) lineObj.part = part;
 
-          let fullText = "";
-          let lineHasBg = false;
-
-          function processSpan(spanNode: any, currentBg: boolean) {
-             const isBg = currentBg || spanNode['@_ttm:role'] === 'x-bg';
-             
-             if (spanNode['#text']) {
-                 const wordStart = spanNode['@_begin'] ? ttmlTimeToMs(spanNode['@_begin']) : undefined;
-                 const wordEnd = spanNode['@_end'] ? ttmlTimeToMs(spanNode['@_end']) : undefined;
-                 
-                 const wordObj: LyricsWord = {
-                    text: spanNode['#text'],
-                    startTime: wordStart || lineStart,
-                 };
-
-                 if (wordEnd !== undefined) {
-                     wordObj.endTime = wordEnd;
-                 }
-
-                 if (isBg) {
-                     wordObj.isBackground = true;
-                     lineHasBg = true;
-                 }
-
-                 lineObj.words!.push(wordObj);
-                 fullText += spanNode['#text'] + " ";
-             }
-
-             if (spanNode.span) {
-                 const nestedSpans = Array.isArray(spanNode.span) ? spanNode.span : [spanNode.span];
-                 for (const nested of nestedSpans) {
-                     processSpan(nested, isBg);
-                 }
-             }
-          }
+          const context = { fullText: "", hasBg: false };
 
           // Handle spans (words)
           if (p.span && Array.isArray(p.span)) {
              for (const span of p.span) {
-                 processSpan(span, false);
+                 processSpan(span, false, lineStart, lineObj.words!, context);
              }
+          } else if (!p.span) {
+             // If no spans, just grab text
+             context.fullText = p['#text'] || p || "";
           }
 
-          // If no spans, just grab text
-          if (!p.span) {
-             fullText = p['#text'] || p || "";
-          }
+          lineObj.text = context.fullText.trim();
+          if (context.hasBg) lineObj.isBackground = true;
+          if (lineObj.words?.length === 0) delete lineObj.words;
 
-          lineObj.text = fullText.trim();
-          if (lineHasBg) {
-             lineObj.isBackground = true;
-          }
+          // Check for transliterations for this line
+          if (lineKey && rawTransliterations[lineKey]) {
+             lineObj.transliterations = [];
+             for (const rt of rawTransliterations[lineKey]) {
+                const transObj: LyricsTransliteration = { lang: rt.lang, text: "", words: [] };
+                const tContext = { fullText: "", hasBg: false };
+                
+                // the <text> node might contain spans directly
+                if (rt.textObj.span && Array.isArray(rt.textObj.span)) {
+                    for (const span of rt.textObj.span) {
+                        processSpan(span, false, lineStart, transObj.words!, tContext);
+                    }
+                } else if (!rt.textObj.span) {
+                    tContext.fullText = rt.textObj['#text'] || rt.textObj || "";
+                }
 
-          if (lineObj.words?.length === 0) {
-             delete lineObj.words;
+                transObj.text = tContext.fullText.trim();
+                if (transObj.words?.length === 0) delete transObj.words;
+                lineObj.transliterations.push(transObj);
+             }
           }
 
           parsedLines.push(lineObj);
        }
     }
 
-    // Sort lines by startTime just in case
     parsedLines.sort((a, b) => a.startTime - b.startTime);
 
     return {

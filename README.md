@@ -110,6 +110,17 @@ interface LyricsLine {
   part?: string;          // Song part (e.g. "Verse", "Chorus")
   isBackground?: boolean; // True if this line contains background vocals
   words?: LyricsWord[];   // Array of word-level timings if supported
+  transliterations?: LyricsTransliteration[]; // Alternate language representations
+}
+```
+
+#### `LyricsTransliteration`
+Alternate language representations for a line (e.g., Romanized Japanese), extracted from TTML `<transliterations>` metadata.
+```typescript
+interface LyricsTransliteration {
+  lang: string;           // Language code (e.g. "ja-Latn")
+  text: string;           // The transliterated text
+  words?: LyricsWord[];   // Word-level synchronization for the transliteration
 }
 ```
 
