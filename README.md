@@ -92,9 +92,16 @@ When parsing a file like `lyrics-word.ttml`, the resulting `LyricsDocument` JSON
 
 ## API Reference
 
-### `LyricsParser.detectFormat(content: string): 'ttml' | 'elrc' | 'lrc'`
+### `LyricsParser.detectFormat(content: string): LyricsFormat`
 
 Detects and returns the format of the provided lyrics string without parsing the entire document.
+
+```typescript
+interface LyricsFormat {
+  lyricsType: 'lrc' | 'ttml';
+  isSyllable: boolean;
+}
+```
 
 ### `LyricsParser.parse(content: string, options?: ParserOptions): LyricsDocument`
 

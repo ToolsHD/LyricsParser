@@ -63,3 +63,8 @@ export interface ParserOptions {
 export interface ILyricsParser {
   parse(content: string, options?: ParserOptions): LyricsDocument;
 }
+
+export interface LyricsFormat {
+  lyricsType: 'lrc' | 'ttml';
+  isSyllable: boolean;
+}
