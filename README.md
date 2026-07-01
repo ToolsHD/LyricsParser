@@ -92,6 +92,10 @@ When parsing a file like `lyrics-word.ttml`, the resulting `LyricsDocument` JSON
 
 ## API Reference
 
+### `LyricsParser.detectFormat(content: string): 'ttml' | 'elrc' | 'lrc'`
+
+Detects and returns the format of the provided lyrics string without parsing the entire document.
+
 ### `LyricsParser.parse(content: string, options?: ParserOptions): LyricsDocument`
 
 Returns a `LyricsDocument` containing parsed metadata and synchronized lines.
