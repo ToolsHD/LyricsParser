@@ -2,3 +2,9 @@ node_modules/
 dist/
 .env
 Samples/
+*.tgz
+
+# Internal Documentation
+docs/
+AGENTS.md
+agents.md

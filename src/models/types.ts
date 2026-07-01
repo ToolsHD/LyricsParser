@@ -6,11 +6,12 @@ export interface LyricsMetadata {
   duration?: string;
   agents?: Record<string, LyricsAgent>;
   attributes?: Record<string, string>;
+  isRTL?: boolean;
 }
 
 export interface LyricsAgent {
   name: string;
-  type?: string;
+  type?: "person" | "character" | "group" | "organization" | "other" | string;
 }
 
 export interface LyricsWord {
@@ -19,6 +20,14 @@ export interface LyricsWord {
   endTime?: number;
   isBackground?: boolean;
   isSyllable?: boolean;
+  ruby?: string;
+}
+
+export interface LyricsTranslation {
+  lang: string;
+  type?: string;
+  text: string;
+  words?: LyricsWord[];
 }
 
 export interface LyricsTransliteration {
@@ -35,8 +44,11 @@ export interface LyricsLine {
   text: string;
   part?: string;
   isBackground?: boolean;
+  isObscene?: boolean;
+  isEmptyBeat?: boolean;
   words?: LyricsWord[];
   transliterations?: LyricsTransliteration[];
+  translations?: LyricsTranslation[];
 }
 
 export interface LyricsDocument {

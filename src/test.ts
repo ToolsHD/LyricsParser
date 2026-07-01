@@ -13,11 +13,10 @@ function testFormat(name: string, filename: string) {
   
   try {
      const doc = LyricsParser.parse(content);
+     const outPath = filePath + '.parsed.json';
+     fs.writeFileSync(outPath, JSON.stringify(doc, null, 2), 'utf-8');
      console.log('Metadata:', JSON.stringify(doc.metadata, null, 2));
-     console.log(`Parsed ${doc.lines.length} lines.`);
-     if (doc.lines.length > 0) {
-        console.log('First line:', JSON.stringify(doc.lines[0], null, 2));
-     }
+     console.log(`Parsed ${doc.lines.length} lines. Full output saved to ${path.basename(outPath)}`);
   } catch (e) {
      console.error(`Failed to parse ${name}:`, e);
   }
