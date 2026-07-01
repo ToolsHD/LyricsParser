@@ -10,6 +10,8 @@ function testFormat(name: string, filename: string) {
   }
   const content = fs.readFileSync(filePath, 'utf-8');
   console.log(`\n--- Testing ${name} ---`);
+  const format = LyricsParser.detectFormat(content);
+  console.log('Format detected:', format);
   
   try {
      const doc = LyricsParser.parse(content);
