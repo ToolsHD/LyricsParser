@@ -41,27 +41,35 @@ export class ELRCParser implements ILyricsParser {
       }
 
       // Parse word level tags: <mm:ss.xxx>word
-      const wordRegex = /<(\d{2}:\d{2}\.\d{2,3})>([^<]*)/g;
+      const wordRegex = /<(\d{2}:\d{2}\.\d{2,3})>([^<]+)/g;
       const words: LyricsWord[] = [];
       let match;
       let fullText = "";
 
       while ((match = wordRegex.exec(textToParse)) !== null) {
         const wordTimeStr = match[1];
-        const wordText = he.decode(match[2]);
+        const wordText = he.decode(match[2]).trim();
         const wordStartTime = timeStrToMs(wordTimeStr);
         words.push({
           startTime: wordStartTime,
           text: wordText
         });
-        fullText += wordText;
+        fullText += (fullText ? ' ' : '') + wordText;
       }
 
       // Assign word end times based on next word start time
-      for (let w = 0; w < words.length - 1; w++) {
+      for (let w = 0; w < words.length; w++) {
         if (words[w].endTime === undefined) {
-           words[w].endTime = words[w + 1].startTime;
+          if (w < words.length - 1) {
+            words[w].endTime = words[w + 1].startTime;
+          }
         }
+      }
+
+      // Use trailing <timestamp> as last word's endTime
+      const trailingTs = textToParse.match(/(\d{2}:\d{2}\.\d{2,3})>\s*$/);
+      if (trailingTs && words.length > 0) {
+        words[words.length - 1].endTime = timeStrToMs(trailingTs[1]);
       }
 
       // If no words were found (maybe hybrid file), just use the rest of the text
@@ -93,10 +101,15 @@ export class ELRCParser implements ILyricsParser {
       parsedLines.push(parsedLine);
     }
 
-    // Assign line end times based on next line
-    for (let i = 0; i < parsedLines.length - 1; i++) {
+    // Assign line end times based on next line or last word
+    for (let i = 0; i < parsedLines.length; i++) {
       if (parsedLines[i].endTime === undefined) {
-        parsedLines[i].endTime = parsedLines[i + 1].startTime;
+        if (i < parsedLines.length - 1) {
+          parsedLines[i].endTime = parsedLines[i + 1].startTime;
+        } else if (parsedLines[i].words && parsedLines[i].words!.length > 0) {
+          const lastWord = parsedLines[i].words![parsedLines[i].words!.length - 1];
+          parsedLines[i].endTime = lastWord.endTime ?? lastWord.startTime;
+        }
       }
     }
 
